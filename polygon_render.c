@@ -1,0 +1,485 @@
+#include "polygon_render.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <stdbool.h>
+#include <float.h>
+#include <xmath.h>
+#include <xmath3d.h>
+
+Polygon rotate_polygon(Polygon poly, double angle) {
+    Polygon newPoly;
+    newPoly.points = malloc(sizeof(vec_t) * poly.count);
+    newPoly.count = poly.count;
+	if (newPoly.points == NULL) {
+        printf("Error: memory allocation for rotate_polygon failed.\n");
+    }
+
+    double sum_x = 0, sum_y = 0;
+    double rad = angle * M_PI_F64 / 180.0;
+
+    if (poly.count > 0) {
+        for (int i = 0; i < poly.count; i++) {
+            sum_x += poly.points[i].x;
+            sum_y += poly.points[i].y;
+        }
+        double cx = sum_x / poly.count;
+        double cy = sum_y / poly.count;
+
+        for (int i = 0; i < poly.count; i++) {
+            double x = poly.points[i].x;
+            double y = poly.points[i].y;
+            newPoly.points[i].x = cos(rad) * (x - cx) - sin(rad) * (y - cy) + cx;
+            newPoly.points[i].y = sin(rad) * (x - cx) + cos(rad) * (y - cy) + cy;
+            newPoly.points[i].z = 0.0f; // Z coordinate remains 0 for 2D operations
+        }
+    } else {
+        free(newPoly.points);
+        newPoly.points = NULL;
+        newPoly.count = 0;
+        printf("Warning: rotate_polygon was given an empty polygon.\n");
+    }
+
+    return newPoly;
+}
+
+vec_t intersect(vec_t A1, vec_t B1, vec_t A2, vec_t B2) {
+    double x1 = A1.x; double y1 = A1.y; double x2 = B1.x; double y2 = B1.y;
+    double x3 = A2.x; double y3 = A2.y; double x4 = B2.x; double y4 = B2.y;
+
+    double den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+
+    if (fabs(den) < DBL_EPSILON) {
+        return (vec_t){NAN, NAN, NAN};
+    }
+
+    double px = ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) / den;
+    double py = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / den;
+
+    vec_t p = {px, py, 0.0f};
+    return p;
+}
+
+
+Polygon offset_polygon(Polygon poly, InfillParams params) {
+    double offset_dist = params.offset_distance;
+    Polygon newPoly;
+
+    newPoly.points = malloc(sizeof(vec_t) * poly.count);
+    newPoly.count = poly.count;
+    if (newPoly.points == NULL) {
+        printf("Error: memory allocation for offset_polygon failed.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    for (int i = 0; i < poly.count; i++) {
+        vec_t P1 = poly.points[(i - 1 + poly.count) % poly.count]; // previous corner
+        vec_t P2 = poly.points[i]; // current corner
+        vec_t P3 = poly.points[(i + 1) % poly.count]; // next corner
+
+        double vec1_dx = P2.x - P1.x;
+        double vec1_dy = P2.y - P1.y;
+        double length1 = sqrt(vec1_dx * vec1_dx + vec1_dy * vec1_dy);
+        double unit_n1x = 0, unit_n1y = 0;
+        if (length1 > DBL_EPSILON) {
+            unit_n1x = -vec1_dy / length1;
+            unit_n1y = vec1_dx / length1;
+        }
+
+        double vec2_dx = P3.x - P2.x;
+        double vec2_dy = P3.y - P2.y;
+        double length2 = sqrt(vec2_dx * vec2_dx + vec2_dy * vec2_dy);
+        double unit_n2x = 0, unit_n2y = 0;
+        if (length2 > DBL_EPSILON) {
+            unit_n2x = -vec2_dy / length2;
+            unit_n2y = vec2_dx / length2;
+        }
+
+        vec_t A1 = {P1.x + offset_dist * unit_n1x, P1.y + offset_dist * unit_n1y, 0.0f};
+        vec_t B1 = {P2.x + offset_dist * unit_n1x, P2.y + offset_dist * unit_n1y, 0.0f};
+        vec_t A2 = {P2.x + offset_dist * unit_n2x, P2.y + offset_dist * unit_n2y, 0.0f};
+        vec_t B2 = {P3.x + offset_dist * unit_n2x, P3.y + offset_dist * unit_n2y, 0.0f};
+
+        vec_t ip = intersect(A1, B1, A2, B2);
+
+        // Checks that the intersection point is valid 
+        if (isnan(ip.x) || isnan(ip.y)) {
+            newPoly.points[i] = P2; // uses the original point
+        } else {
+            newPoly.points[i].x = ip.x;
+            newPoly.points[i].y = ip.y;
+            newPoly.points[i].z = 0.0f;
+        }
+    }
+    return newPoly;
+}
+
+InfillPointNode* create_node(vec_t p) {
+    InfillPointNode* new_node = (InfillPointNode*)malloc(sizeof(InfillPointNode));
+    if (new_node == NULL) {
+        printf("Error: Memory allocation for create_node failed.\n");
+        exit(EXIT_FAILURE);
+    }
+    new_node->point = p;
+    new_node->next = NULL;
+    return new_node;
+}
+
+void add_to_list(InfillPointNode** head, vec_t p) {
+    InfillPointNode* new_node = create_node(p);
+    if (*head == NULL) {
+        *head = new_node;
+    } else {
+        InfillPointNode* current = *head;
+        while (current->next != NULL) {
+            current = current->next;
+        }
+        current->next = new_node;
+    }
+}
+
+void free_list(InfillPointNode* head) {
+    InfillPointNode* current = head;
+    while (current != NULL) {
+        InfillPointNode* next = current->next;
+        free(current);
+        current = next;
+    }
+}
+
+vec_t* list_to_array(InfillPointNode* head, int* count) {
+    int num_points = 0;
+    InfillPointNode* current = head;
+
+    while (current != NULL) {
+        num_points++;
+        current = current->next;
+    }
+
+    vec_t* point_array = (vec_t*)malloc(num_points * sizeof(vec_t));
+    if (point_array == NULL) {
+        printf("Error: Memory allocation for list_to_array failed.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    current = head;
+    for (int i = 0; i < num_points; i++) {
+        point_array[i] = current->point;
+        current = current->next;
+    }
+    *count = num_points;
+    return point_array;
+}
+
+
+vec_t* generate_infill_path(Polygon poly, InfillParams params, int* output_count) {
+    Polygon rotPoly = rotate_polygon(poly, params.infill_angle);
+    if (rotPoly.count == 0) {
+        free_polygon(&rotPoly);
+        *output_count = 0;
+        return NULL;
+    }
+
+    double min_y = rotPoly.points[0].y;
+    double max_y = rotPoly.points[0].y;
+
+    for (int i = 0; i < rotPoly.count; i++) {
+        if (rotPoly.points[i].y < min_y) min_y = rotPoly.points[i].y;
+        if (rotPoly.points[i].y > max_y) max_y = rotPoly.points[i].y;
+    }
+
+    double scan_spacing = params.scan_radius * (1.0 - params.overlap_ratio);
+
+    InfillPointNode* infill_list_head = NULL;
+    double epsilon = DBL_EPSILON * 1000.0;
+
+    vec_t previous_line_end_point = {NAN, NAN, NAN};
+    bool forward_scan = true;
+
+    for (double y = min_y + epsilon; y <= max_y - epsilon; y += scan_spacing) {
+        vec_t* current_line_intersections = (vec_t*)malloc(sizeof(vec_t) * rotPoly.count * 2);
+        if (current_line_intersections == NULL) { 
+            printf("Error: Memory allocation failed in generate_infill_path.\n");
+            free_list(infill_list_head);
+            free_polygon(&rotPoly);
+            *output_count = 0;
+            return NULL;
+        }
+        int numIntersections = 0;
+
+        vec_t line_start = {-1e12, y, 0.0f};
+        vec_t line_end = {1e12, y, 0.0f};
+
+        for (int j = 0; j < rotPoly.count; j++) {
+            vec_t p1 = rotPoly.points[j];
+            vec_t p2 = rotPoly.points[(j + 1) % rotPoly.count];
+
+            /* Special case: If the y-value of the intersection point is very close to the scan line
+			and the segment is horizontal, we should not add this point twice and do special processing (the entire edge is on the line). */
+            if (fabs(p1.y - y) < epsilon && fabs(p2.y - y) < epsilon) {
+                if (p1.x < p2.x) {
+                    bool is_duplicate1 = false;
+                    for (int k = 0; k < numIntersections; k++) {
+                        if (fabs(current_line_intersections[k].x - p1.x) < epsilon && fabs(current_line_intersections[k].y - p1.y) < epsilon) {
+                            is_duplicate1 = true; break;
+                        }
+                    }
+                    if (!is_duplicate1) current_line_intersections[numIntersections++] = p1;
+
+                    bool is_duplicate2 = false;
+                    for (int k = 0; k < numIntersections; k++) {
+                        if (fabs(current_line_intersections[k].x - p2.x) < epsilon && fabs(current_line_intersections[k].y - p2.y) < epsilon) {
+                            is_duplicate2 = true; break;
+                        }
+                    }
+                    if (!is_duplicate2) current_line_intersections[numIntersections++] = p2;
+
+                } else {
+                    bool is_duplicate1 = false;
+                    for (int k = 0; k < numIntersections; k++) {
+                        if (fabs(current_line_intersections[k].x - p2.x) < epsilon && fabs(current_line_intersections[k].y - p2.y) < epsilon) {
+                            is_duplicate1 = true; break;
+                        }
+                    }
+                    if (!is_duplicate1) current_line_intersections[numIntersections++] = p2;
+
+                    bool is_duplicate2 = false;
+                    for (int k = 0; k < numIntersections; k++) {
+                        if (fabs(current_line_intersections[k].x - p1.x) < epsilon && fabs(current_line_intersections[k].y - p1.y) < epsilon) {
+                            is_duplicate2 = true; break;
+                        }
+                    }
+                    if (!is_duplicate2) current_line_intersections[numIntersections++] = p1;
+                }
+                continue;
+            }
+
+            vec_t ip = intersect(line_start, line_end, p1, p2);
+
+            if (!isnan(ip.x) && !isnan(ip.y) &&
+                (ip.x >= fmin(p1.x, p2.x) - epsilon && ip.x <= fmax(p1.x, p2.x) + epsilon) &&
+                (ip.y >= fmin(p1.y, p2.y) - epsilon && ip.y <= fmax(p1.y, p2.y) + epsilon)) {
+
+                bool is_duplicate = false;
+                for (int k = 0; k < numIntersections; k++) {
+                    if (fabs(current_line_intersections[k].x - ip.x) < epsilon && fabs(current_line_intersections[k].y - ip.y) < epsilon) {
+                        is_duplicate = true;
+                        break;
+                    }
+                }
+
+                if (!is_duplicate) {
+                    current_line_intersections[numIntersections++] = ip;
+                }
+            }
+        }
+
+        for (int i = 0; i < numIntersections - 1; i++) {
+            for (int j = i + 1; j < numIntersections; j++) {
+                if (current_line_intersections[i].x > current_line_intersections[j].x) {
+                    vec_t temp = current_line_intersections[j];
+                    current_line_intersections[j] = current_line_intersections[i];
+                    current_line_intersections[i] = temp;
+                }
+            }
+        }
+
+        if (numIntersections >= 2 && numIntersections % 2 == 0) {
+            if (!isnan(previous_line_end_point.x)) {
+                if (forward_scan) {
+                    add_to_list(&infill_list_head, previous_line_end_point);
+                    add_to_list(&infill_list_head, current_line_intersections[0]);
+                } else {
+                    add_to_list(&infill_list_head, previous_line_end_point);
+                    add_to_list(&infill_list_head, current_line_intersections[numIntersections - 1]);
+                }
+            }
+
+            if (forward_scan) {
+                for (int i = 0; i < numIntersections; i += 2) {
+                    add_to_list(&infill_list_head, current_line_intersections[i]);
+                    add_to_list(&infill_list_head, current_line_intersections[i + 1]);
+                }
+                previous_line_end_point = current_line_intersections[numIntersections - 1];
+            } else {
+                for (int i = numIntersections - 1; i >= 0; i -= 2) {
+                    add_to_list(&infill_list_head, current_line_intersections[i]);
+                    add_to_list(&infill_list_head, current_line_intersections[i - 1]);
+                }
+                previous_line_end_point = current_line_intersections[0];
+            }
+        }
+        free(current_line_intersections);
+        forward_scan = !forward_scan;
+    }
+
+    vec_t* infill_points = list_to_array(infill_list_head, output_count);
+	free_list(infill_list_head);
+
+    Polygon temp_infill_poly;
+    temp_infill_poly.points = infill_points;
+    temp_infill_poly.count = *output_count;
+
+    Polygon rotated_infill_poly = rotate_polygon(temp_infill_poly, -params.infill_angle);
+
+    if (infill_points != NULL) {
+        free(infill_points);
+    }
+
+    *output_count = rotated_infill_poly.count;
+    free_polygon(&rotPoly);
+
+    return rotated_infill_poly.points;
+}
+
+void set_pixel(unsigned char* image, int width, int height, int x, int y, unsigned char r, unsigned char g, unsigned char b) {
+    if (x >= 0 && x < width && y >= 0 && y < height) {
+        int index = (y * width + x) * 3;
+        image[index + 0] = b;
+        image[index + 1] = g;
+        image[index + 2] = r;
+    }
+}
+
+void draw_line(unsigned char* image, int width, int height,
+                vec_t p1_geo, vec_t p2_geo,
+                double scale_x, double scale_y,
+                double min_x, double min_y,
+                unsigned char r, unsigned char g, unsigned char b) {
+
+    int x1 = (int)((p1_geo.x - min_x) * scale_x);
+    int y1 = (int)((p1_geo.y - min_y) * scale_y);
+    int x2 = (int)((p2_geo.x - min_x) * scale_x);
+    int y2 = (int)((p2_geo.y - min_y) * scale_y);
+
+    x1 = fmax(0, fmin(width - 1, x1));
+    y1 = fmax(0, fmin(height - 1, y1));
+    x2 = fmax(0, fmin(width - 1, x2));
+    y2 = fmax(0, fmin(height - 1, y2));
+
+    int dx = abs(x2 - x1);
+    int dy = abs(y2 - y1);
+    int sx = (x1 < x2) ? 1 : -1;
+    int sy = (y1 < y2) ? 1 : -1;
+    int err = dx - dy;
+
+    while (1) {
+        set_pixel(image, width, height, x1, y1, r, g, b);
+		if (x1 == x2 && y1 == y2) break;
+        int e2 = 2 * err;
+        if (e2 > -dy) { err -= dy; x1 += sx; }
+        if (e2 < dx) { err += dx; y1 += sy; }
+    }
+}
+
+void export_to_bmp(Polygon poly, vec_t* path, int path_count, const char* filename) {
+    double min_x = DBL_MAX, max_x = -DBL_MAX;
+    double min_y = DBL_MAX, max_y = -DBL_MAX;
+
+    if (poly.count > 0) {
+        min_x = poly.points[0].x; max_x = poly.points[0].x;
+        min_y = poly.points[0].y; max_y = poly.points[0].y;
+        for (int i = 0; i < poly.count; i++) {
+            if (poly.points[i].x < min_x) min_x = poly.points[i].x;
+            if (poly.points[i].x > max_x) max_x = poly.points[i].x;
+            if (poly.points[i].y < min_y) min_y = poly.points[i].y;
+            if (poly.points[i].y > max_y) max_y = poly.points[i].y;
+        }
+    }
+
+    for (int i = 0; i < path_count; i++) {
+        if (path[i].x < min_x) min_x = path[i].x;
+        if (path[i].x > max_x) max_x = path[i].x;
+        if (path[i].y < min_y) min_y = path[i].y;
+        if (path[i].y > max_y) max_y = path[i].y;
+    }
+
+    if (fabs(max_x - min_x) < DBL_EPSILON) {
+        min_x -= 50.0; max_x += 50.0;
+    }
+    if (fabs(max_y - min_y) < DBL_EPSILON) {
+        min_y -= 50.0; max_y += 50.0;
+    }
+
+    double current_range_x = max_x - min_x;
+    double current_range_y = max_y - min_y;
+
+    double padding_factor = 0.2;
+    double padding_x = fmax(current_range_x * padding_factor, 10.0);
+    double padding_y = fmax(current_range_y * padding_factor, 10.0);
+
+    min_x -= padding_x;
+    max_x += padding_x;
+    min_y -= padding_y;
+    max_y += padding_y;
+
+    double range_x = max_x - min_x;
+    double range_y = max_y - min_y;
+
+    int width = 1200;
+    int height = 1200;
+
+    double scale = fmin((double)(width-1) / range_x, (double)(height-1) / range_y);
+    double scale_x = scale;
+    double scale_y = scale;
+
+    unsigned char* image = (unsigned char*)calloc(width * height * 3, 1);
+    if (image == NULL) {
+        printf("Error: Memory allocation for BMP image failed.\n");
+        return;
+    }
+
+    for (int i = 0; i < width * height * 3; ++i) {
+        image[i] = 255;
+    }
+
+    for (int i = 0; i < poly.count; i++) { // Draws the polygon frame (black)
+        vec_t p1 = poly.points[i];
+        vec_t p2 = poly.points[(i + 1) % poly.count];
+        draw_line(image, width, height, p1, p2, scale_x, scale_y, min_x, min_y, 0, 0, 0);
+    }
+
+    for (int i = 0; i < path_count - 1; i++) { // Draws the infill path (red)
+        draw_line(image, width, height, path[i], path[i+1], scale_x, scale_y, min_x, min_y, 255, 0, 0);
+    }
+
+    FILE* fp = fopen(filename, "wb");
+    if (fp == NULL) {
+        printf("Error: Failed to create BMP file: %s\n", filename);
+        free(image);
+        return;
+    }
+
+    unsigned char bmp_file_header[14] = {'B','M', 0,0,0,0, 0,0, 0,0, 54,0,0,0};
+    unsigned int file_size = width * height * 3 + 54;
+    bmp_file_header[2] = (unsigned char)(file_size);
+    bmp_file_header[3] = (unsigned char)(file_size >> 8);
+    bmp_file_header[4] = (unsigned char)(file_size >> 16);
+    bmp_file_header[5] = (unsigned char)(file_size >> 24);
+    fwrite(bmp_file_header, 1, 14, fp);
+
+    unsigned char bmp_info_header[40] = {40,0,0,0, 0,0,0,0, 0,0,0,0, 1,0,24,0};
+    bmp_info_header[4] = (unsigned char)(width);
+    bmp_info_header[5] = (unsigned char)(width >> 8);
+    bmp_info_header[6] = (unsigned char)(width >> 16);
+    bmp_info_header[7] = (unsigned char)(width >> 24);
+    bmp_info_header[8] = (unsigned char)(height);
+    bmp_info_header[9] = (unsigned char)(height >> 8);
+    bmp_info_header[10] = (unsigned char)(height >> 16);
+    bmp_info_header[11] = (unsigned char)(height >> 24);
+    fwrite(bmp_info_header, 1, 40, fp);
+
+    fwrite(image, 1, width * height * 3, fp);
+
+    fclose(fp);
+    free(image);
+}
+
+void free_polygon(Polygon* poly) {
+    if (poly != NULL && poly->points != NULL) {
+        free(poly->points);
+        poly->points = NULL;
+        poly->count = 0;
+    }
+}
