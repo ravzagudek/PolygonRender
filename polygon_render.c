@@ -5,19 +5,23 @@
 #include <math.h>
 #include <stdbool.h>
 #include <float.h>
-#include <xmath.h>
-#include <xmath3d.h>
 
 Polygon rotate_polygon(Polygon poly, double angle) {
-    Polygon newPoly;
+    Polygon newPoly = {NULL, 0};
+    if (poly.points == NULL || poly.count <= 0) {
+        printf("Warning: rotate_polygon given NULL points or empty polygon.\n");
+        return newPoly;
+    }
     newPoly.points = malloc(sizeof(vec_t) * poly.count);
     newPoly.count = poly.count;
 	if (newPoly.points == NULL) {
         printf("Error: memory allocation for rotate_polygon failed.\n");
+        newPoly.count = 0;
+        return newPoly;
     }
 
     double sum_x = 0, sum_y = 0;
-    double rad = angle * M_PI_F64 / 180.0;
+    double rad = angle * M_PI / 180.0;
 
     if (poly.count > 0) {
         for (int i = 0; i < poly.count; i++) {
@@ -58,19 +62,39 @@ vec_t intersect(vec_t A1, vec_t B1, vec_t A2, vec_t B2) {
     double py = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / den;
 
     vec_t p = {px, py, 0.0f};
-    return p;
+    if (
+        p.x >= fmin(A1.x, B1.x) && p.x <= fmax(A1.x, B1.x) &&
+        p.x >= fmin(A2.x, B2.x) && p.x <= fmax(A2.x, B2.x) &&
+        p.y >= fmin(A1.y, B1.y) && p.y <= fmax(A1.y, B1.y) && 
+        p.y >= fmin(A2.y, B2.y) && p.y <= fmax(A2.y, B2.y) ){
+        return p;
+    } else {
+        return (vec_t) {NAN, NAN, NAN};
+    }
+    
 }
 
+vec_t find_normal_unit_vector(vec_t p1, vec_t p2){
+    double vec_dx = p2.x - p1.x;
+    double vec_dy = p2.y - p1.y;
+    double len = sqrt(vec_dx * vec_dx + vec_dy * vec_dy);
+    double nx = 0, ny = 0;
+    if (len > DBL_EPSILON) {
+        nx = -vec_dy/len ; ny = vec_dx/len;
+    }
+    vec_t n = {nx, ny, 0.0f};
+    return n;
+}
 
 Polygon offset_polygon(Polygon poly, InfillParams params) {
     double offset_dist = params.offset_distance;
     Polygon newPoly;
-
     newPoly.points = malloc(sizeof(vec_t) * poly.count);
     newPoly.count = poly.count;
     if (newPoly.points == NULL) {
         printf("Error: memory allocation for offset_polygon failed.\n");
-        exit(EXIT_FAILURE);
+        newPoly.count = 0; 
+        return newPoly;
     }
 
     for (int i = 0; i < poly.count; i++) {
@@ -78,28 +102,13 @@ Polygon offset_polygon(Polygon poly, InfillParams params) {
         vec_t P2 = poly.points[i]; // current corner
         vec_t P3 = poly.points[(i + 1) % poly.count]; // next corner
 
-        double vec1_dx = P2.x - P1.x;
-        double vec1_dy = P2.y - P1.y;
-        double length1 = sqrt(vec1_dx * vec1_dx + vec1_dy * vec1_dy);
-        double unit_n1x = 0, unit_n1y = 0;
-        if (length1 > DBL_EPSILON) {
-            unit_n1x = -vec1_dy / length1;
-            unit_n1y = vec1_dx / length1;
-        }
-
-        double vec2_dx = P3.x - P2.x;
-        double vec2_dy = P3.y - P2.y;
-        double length2 = sqrt(vec2_dx * vec2_dx + vec2_dy * vec2_dy);
-        double unit_n2x = 0, unit_n2y = 0;
-        if (length2 > DBL_EPSILON) {
-            unit_n2x = -vec2_dy / length2;
-            unit_n2y = vec2_dx / length2;
-        }
-
-        vec_t A1 = {P1.x + offset_dist * unit_n1x, P1.y + offset_dist * unit_n1y, 0.0f};
-        vec_t B1 = {P2.x + offset_dist * unit_n1x, P2.y + offset_dist * unit_n1y, 0.0f};
-        vec_t A2 = {P2.x + offset_dist * unit_n2x, P2.y + offset_dist * unit_n2y, 0.0f};
-        vec_t B2 = {P3.x + offset_dist * unit_n2x, P3.y + offset_dist * unit_n2y, 0.0f};
+        vec_t unit_n1 = find_normal_unit_vector(P1, P2);
+        vec_t unit_n2 = find_normal_unit_vector(P2, P3);
+       
+        vec_t A1 = {P1.x + offset_dist * unit_n1.x, P1.y + offset_dist * unit_n1.y, 0.0f};
+        vec_t B1 = {P2.x + offset_dist * unit_n1.x, P2.y + offset_dist * unit_n1.y, 0.0f};
+        vec_t A2 = {P2.x + offset_dist * unit_n2.x, P2.y + offset_dist * unit_n2.y, 0.0f};
+        vec_t B2 = {P3.x + offset_dist * unit_n2.x, P3.y + offset_dist * unit_n2.y, 0.0f};
 
         vec_t ip = intersect(A1, B1, A2, B2);
 
@@ -148,13 +157,53 @@ void free_list(InfillPointNode* head) {
     }
 }
 
+RingNode* reverse_ring_list (RingNode* head){
+    RingNode* prev = NULL;
+    RingNode* curr = head;
+    while (curr!=NULL){
+        RingNode* next = curr->next;
+        curr->next = prev;
+        prev = curr;
+        curr = next;
+    }
+    return prev;
+}
+
+double calc_poly_area(Polygon poly){
+    double area = 0.0;
+    for (int i=0; i<poly.count; i++){
+        vec_t p1 = poly.points[i];
+        vec_t p2 = poly.points[(i+1)%poly.count];
+        area += (p1.x * p2.y) - (p2.x * p1.y);
+    }
+    return area*0.5;
+}
+
+void reverse_poly_points(Polygon* poly){
+    for (int i = 0; i < poly->count/2; i++){
+        vec_t temp = poly->points[i];
+        poly->points[i] = poly->points[poly->count - 1 - i];
+        poly->points[poly->count - 1 - i] = temp;
+    }
+}
+
 vec_t* list_to_array(InfillPointNode* head, int* count) {
+    *count = 0;
+    if (head == NULL) {
+        return NULL;
+    }
+
     int num_points = 0;
     InfillPointNode* current = head;
 
     while (current != NULL) {
         num_points++;
         current = current->next;
+    }
+
+    if (num_points == 0) {
+        *count = 0;
+        return NULL;
     }
 
     vec_t* point_array = (vec_t*)malloc(num_points * sizeof(vec_t));
@@ -172,8 +221,7 @@ vec_t* list_to_array(InfillPointNode* head, int* count) {
     return point_array;
 }
 
-
-vec_t* generate_infill_path(Polygon poly, InfillParams params, int* output_count) {
+vec_t* generate_horizontal_path(Polygon poly, InfillParams params, int* output_count) {
     Polygon rotPoly = rotate_polygon(poly, params.infill_angle);
     if (rotPoly.count == 0) {
         free_polygon(&rotPoly);
@@ -181,8 +229,7 @@ vec_t* generate_infill_path(Polygon poly, InfillParams params, int* output_count
         return NULL;
     }
 
-    double min_y = rotPoly.points[0].y;
-    double max_y = rotPoly.points[0].y;
+    double min_y = rotPoly.points[0].y; double max_y = rotPoly.points[0].y;
 
     for (int i = 0; i < rotPoly.count; i++) {
         if (rotPoly.points[i].y < min_y) min_y = rotPoly.points[i].y;
@@ -322,15 +369,118 @@ vec_t* generate_infill_path(Polygon poly, InfillParams params, int* output_count
     temp_infill_poly.count = *output_count;
 
     Polygon rotated_infill_poly = rotate_polygon(temp_infill_poly, -params.infill_angle);
-
+    free_polygon(&temp_infill_poly); 
     if (infill_points != NULL) {
-        free(infill_points);
+        temp_infill_poly.points = NULL; temp_infill_poly.count = 0;
     }
 
+    infill_points = rotated_infill_poly.points;
     *output_count = rotated_infill_poly.count;
     free_polygon(&rotPoly);
+    return infill_points;
+}
 
-    return rotated_infill_poly.points;
+vec_t* generate_spiral_path(Polygon poly, InfillParams params, int* output_count){
+    double scan_spacing = params.scan_radius * (1.0 - params.overlap_ratio);
+    InfillPointNode* infillPathHead = NULL;
+    *output_count = 0;
+    RingNode* ringHead = NULL; RingNode* ringTail = NULL;
+    params.offset_distance = -(scan_spacing); Polygon currPoly = poly;
+    double lastArea = calc_poly_area(poly);
+    while (true) {
+        Polygon nextPoly = offset_polygon(currPoly, params);
+        // When the polygon area shrinks sufficiently or begins to grow, end the loop
+        double currArea = calc_poly_area(nextPoly);
+        if (fabs(currArea) < (scan_spacing * scan_spacing) / 2.0 || fabs(currArea)>=fabs(lastArea)){
+            // Find the least polygon's center, free polygons and break the loop
+            double sumx=0, sumy=0, cx=0, cy=0;
+            for (int i = 0; i < currPoly.count; i++){
+                sumx += currPoly.points[i].x; sumy += currPoly.points[i].y;
+            }
+            cx = sumx / currPoly.count; cy = sumy / currPoly.count;
+            vec_t center = {cx, cy, 0.0f}; add_to_list(&infillPathHead, center);
+            free_polygon(&currPoly); free_polygon(&nextPoly);
+            break;
+        }
+        // Save all the points of the rings in the same direction
+        if (calc_poly_area(currPoly)*calc_poly_area(nextPoly)<0) reverse_poly_points(&nextPoly);
+        // Create a single ring of ofsetted polygon
+        InfillPointNode* singleRing = NULL;
+        for (int i = 0; i < nextPoly.count; i++){
+            add_to_list(&singleRing, nextPoly.points[i]);
+        }
+        // Add the new polygon into the main ofsetted polygons list
+        RingNode* newRing = malloc(sizeof(RingNode));
+        if (newRing==NULL){
+            printf("Error: Memory allocation for RingNode failed.\n");
+            while (ringHead){
+                RingNode* temp = ringHead->next;
+                free_list(ringHead->ringPoints);
+                free(ringHead);
+                ringHead = temp;
+            }
+            free_polygon(&currPoly);
+            *output_count = 0;
+            return NULL;
+        }
+
+        newRing->ringPoints=singleRing; 
+        newRing->count=nextPoly.count; 
+        newRing->next=NULL;
+        
+        if (ringHead==NULL){
+            ringHead=newRing; ringTail=newRing;
+        } else {
+            ringTail->next = newRing; ringTail=newRing;
+        }
+        free_polygon(&currPoly); currPoly = nextPoly; lastArea=currArea;
+    }
+    
+    ringHead = reverse_ring_list(ringHead);
+    vec_t lastPoint = {NAN, NAN, NAN};
+    RingNode* currRing = ringHead;
+    while (currRing!=NULL){
+        InfillPointNode* currPoint = currRing->ringPoints;
+
+        if (!isnan(lastPoint.x) && !isnan(lastPoint.y)){
+            add_to_list(&infillPathHead, lastPoint);
+            vec_t newPoint = {(lastPoint.x), (lastPoint.y - scan_spacing), 0.0f};
+            add_to_list(&infillPathHead, newPoint);
+            add_to_list(&infillPathHead, currPoint->point);
+        }
+
+        while(currPoint!=NULL){
+            add_to_list(&infillPathHead, currPoint->point);
+            lastPoint = currPoint->point;
+            currPoint = currPoint->next;
+        }
+        currRing = currRing->next;
+    }
+        
+    // Free ring list
+    RingNode* curr = ringHead;
+    while(curr!=NULL){
+        RingNode* next = curr->next;
+        free_list(curr->ringPoints);
+        free(curr);
+        curr = next;
+    }
+
+    vec_t* infill_points = list_to_array(infillPathHead, output_count);
+	free_list(infillPathHead);
+    return infill_points;  
+}
+
+vec_t* generate_infill_path(Polygon poly, InfillParams params, int* output_count, int choice) {
+    *output_count = 0;
+    switch (choice){
+    case 1:
+        return generate_horizontal_path(poly, params, output_count);
+    case 2:
+        return generate_spiral_path(poly, params, output_count);
+    default:
+        return NULL;
+    }
 }
 
 void set_pixel(unsigned char* image, int width, int height, int x, int y, unsigned char r, unsigned char g, unsigned char b) {
@@ -388,11 +538,13 @@ void export_to_bmp(Polygon poly, vec_t* path, int path_count, const char* filena
         }
     }
 
-    for (int i = 0; i < path_count; i++) {
-        if (path[i].x < min_x) min_x = path[i].x;
-        if (path[i].x > max_x) max_x = path[i].x;
-        if (path[i].y < min_y) min_y = path[i].y;
-        if (path[i].y > max_y) max_y = path[i].y;
+    if (path != NULL) {
+        for (int i = 0; i < path_count; i++) {
+            if (path[i].x < min_x) min_x = path[i].x;
+            if (path[i].x > max_x) max_x = path[i].x;
+            if (path[i].y < min_y) min_y = path[i].y;
+            if (path[i].y > max_y) max_y = path[i].y;
+        }
     }
 
     if (fabs(max_x - min_x) < DBL_EPSILON) {
@@ -420,6 +572,8 @@ void export_to_bmp(Polygon poly, vec_t* path, int path_count, const char* filena
     int width = 1200;
     int height = 1200;
 
+    if (range_x < DBL_EPSILON) range_x = 1.0;
+    if (range_y < DBL_EPSILON) range_y = 1.0;
     double scale = fmin((double)(width-1) / range_x, (double)(height-1) / range_y);
     double scale_x = scale;
     double scale_y = scale;

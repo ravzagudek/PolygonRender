@@ -5,15 +5,16 @@
 #include <stdlib.h>
 #include <math.h>
 #include <stdbool.h>
-#include <xmath.h>
-#include <xmath3d.h>
+#include "xmath.h"
+#include "xmath3d.h"
+#define M_PI 3.14159265358979323846
 
 typedef struct { // Polygon structure
     vec_t* points; // Dynamic array of the points of the polygon
     int count;     // Number of the points of the polygon
 } Polygon;
 
-typedef struct InfillPointNode { // linked list node structure, used to dynamically store the points of the infill path
+typedef struct InfillPointNode { // A linked list node structure, used to dynamically store the points of the infill path
     vec_t point;                // Point hidden in the node
     struct InfillPointNode* next; // Pointer to the next node in the linked list
 } InfillPointNode;
@@ -25,34 +26,42 @@ typedef struct { // Infill parameters structure
     double offset_distance; // Offset distance to be applied from the polygon edge inwards
 } InfillParams;
 
-// Rotates the polygon by the given angle
-Polygon rotate_polygon(Polygon poly, double angle);
+typedef struct RingNode { // Holds multiple groups of points together in a circular manner
+    InfillPointNode* ringPoints; // Linked list to which the points belong
+    int count; // Number of the points
+    struct RingNode* next; // Pointer to the next RingNode (unidirectional circular list)
+} RingNode;
 
-// Finds the intersection point of two line segments
-vec_t intersect(vec_t A1, vec_t B1, vec_t A2, vec_t B2);
+Polygon rotate_polygon(Polygon poly, double angle); //Rotates the polygon by the given angle
 
-// Offsets the polygon
-Polygon offset_polygon(Polygon poly, InfillParams params);
+vec_t intersect(vec_t A1, vec_t B1, vec_t A2, vec_t B2); //Finds the intersection point of two line segments
 
-// Creates an infill path for the polygon
-vec_t* generate_infill_path(Polygon poly, InfillParams params, int* output_count);
+vec_t find_normal_unit_vector(vec_t p1, vec_t p2); //Finds the normal unit vector between two given points
 
-// Creates a new linked list node
-InfillPointNode* create_node(vec_t p);
+Polygon offset_polygon(Polygon poly, InfillParams params); //Offsets the polygon
 
-// Adds a new node to the list
-void add_to_list(InfillPointNode** head, vec_t p);
+InfillPointNode* create_node(vec_t p); //Creates a new linked list node
 
-// Frees the linked list
-void free_list(InfillPointNode* head);
+void add_to_list(InfillPointNode** head, vec_t p); //Adds a new node to the list
 
-// Turns the linked list into a Point array
-vec_t* list_to_array(InfillPointNode* head, int* count);
+void free_list(InfillPointNode* head); //Frees the linked list
 
-// Exports the created polygon and fill path to a .bmp file
-void export_to_bmp(Polygon poly, vec_t* path, int path_count, const char* filename);
+RingNode* reverse_ring_list (RingNode* head); //Reverses the ring linked list
 
-// Releases memory allocated in the polygon structure
-void free_polygon(Polygon* poly);
+double calc_poly_area(Polygon poly); //Calculates the polygon area by using Shoelace Formula
+
+void reverse_poly_points(Polygon* poly); //Reverses the point list of the polygon
+
+vec_t* list_to_array(InfillPointNode* head, int* count); //Turns the linked list into a Point array
+
+vec_t* generate_horizontal_path(Polygon poly, InfillParams params, int* output_count); //Creates the infill path horizantally
+
+vec_t* generate_spiral_path(Polygon poly, InfillParams params, int* output_count); //Creates the infill path spiral (from center to edges)
+
+vec_t* generate_infill_path(Polygon poly, InfillParams params, int* output_count, int choice); //Creates an infill path for the polygon by using the user's choice
+
+void export_to_bmp(Polygon poly, vec_t* path, int path_count, const char* filename); //Exports the created polygon and fill path to a .bmp file
+
+void free_polygon(Polygon* poly); //Releases memory allocated in the polygon structure
 
 #endif
