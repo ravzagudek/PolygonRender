@@ -8,14 +8,11 @@
 
 Polygon rotate_polygon(Polygon poly, double angle) {
     Polygon newPoly = {NULL, 0};
-    if (poly.points == NULL || poly.count <= 0) {
-        printf("Warning: rotate_polygon given NULL points or empty polygon.\n");
-        return newPoly;
-    }
+    if (poly.points == NULL || poly.count <= 0) return newPoly;
+    
     newPoly.points = malloc(sizeof(vec_t) * poly.count);
     newPoly.count = poly.count;
 	if (newPoly.points == NULL) {
-        printf("Error: memory allocation for rotate_polygon failed.\n");
         newPoly.count = 0;
         return newPoly;
     }
@@ -42,7 +39,6 @@ Polygon rotate_polygon(Polygon poly, double angle) {
         free(newPoly.points);
         newPoly.points = NULL;
         newPoly.count = 0;
-        printf("Warning: rotate_polygon was given an empty polygon.\n");
     }
 
     return newPoly;
@@ -92,7 +88,6 @@ Polygon offset_polygon(Polygon poly, InfillParams params) {
     newPoly.points = malloc(sizeof(vec_t) * poly.count);
     newPoly.count = poly.count;
     if (newPoly.points == NULL) {
-        printf("Error: memory allocation for offset_polygon failed.\n");
         newPoly.count = 0; 
         return newPoly;
     }
@@ -126,10 +121,8 @@ Polygon offset_polygon(Polygon poly, InfillParams params) {
 
 InfillPointNode* create_node(vec_t p) {
     InfillPointNode* new_node = (InfillPointNode*)malloc(sizeof(InfillPointNode));
-    if (new_node == NULL) {
-        printf("Error: Memory allocation for create_node failed.\n");
-        exit(EXIT_FAILURE);
-    }
+    if (new_node == NULL) exit(EXIT_FAILURE);
+    
     new_node->point = p;
     new_node->next = NULL;
     return new_node;
@@ -207,11 +200,8 @@ vec_t* list_to_array(InfillPointNode* head, int* count) {
     }
 
     vec_t* point_array = (vec_t*)malloc(num_points * sizeof(vec_t));
-    if (point_array == NULL) {
-        printf("Error: Memory allocation for list_to_array failed.\n");
-        exit(EXIT_FAILURE);
-    }
-
+    if (point_array == NULL) exit(EXIT_FAILURE);
+    
     current = head;
     for (int i = 0; i < num_points; i++) {
         point_array[i] = current->point;
@@ -247,7 +237,6 @@ vec_t* generate_horizontal_path(Polygon poly, InfillParams params, int* output_c
     for (double y = min_y + epsilon; y <= max_y - epsilon; y += scan_spacing) {
         vec_t* current_line_intersections = (vec_t*)malloc(sizeof(vec_t) * rotPoly.count * 2);
         if (current_line_intersections == NULL) { 
-            printf("Error: Memory allocation failed in generate_infill_path.\n");
             free_list(infill_list_head);
             free_polygon(&rotPoly);
             *output_count = 0;
@@ -412,7 +401,6 @@ vec_t* generate_spiral_path(Polygon poly, InfillParams params, int* output_count
         // Add the new polygon into the main ofsetted polygons list
         RingNode* newRing = malloc(sizeof(RingNode));
         if (newRing==NULL){
-            printf("Error: Memory allocation for RingNode failed.\n");
             while (ringHead){
                 RingNode* temp = ringHead->next;
                 free_list(ringHead->ringPoints);
@@ -444,8 +432,6 @@ vec_t* generate_spiral_path(Polygon poly, InfillParams params, int* output_count
 
         if (!isnan(lastPoint.x) && !isnan(lastPoint.y)){
             add_to_list(&infillPathHead, lastPoint);
-            vec_t newPoint = {(lastPoint.x), (lastPoint.y - scan_spacing), 0.0f};
-            add_to_list(&infillPathHead, newPoint);
             add_to_list(&infillPathHead, currPoint->point);
         }
 
@@ -579,10 +565,7 @@ void export_to_bmp(Polygon poly, vec_t* path, int path_count, const char* filena
     double scale_y = scale;
 
     unsigned char* image = (unsigned char*)calloc(width * height * 3, 1);
-    if (image == NULL) {
-        printf("Error: Memory allocation for BMP image failed.\n");
-        return;
-    }
+    if (image == NULL) return;
 
     for (int i = 0; i < width * height * 3; ++i) {
         image[i] = 255;
@@ -600,7 +583,6 @@ void export_to_bmp(Polygon poly, vec_t* path, int path_count, const char* filena
 
     FILE* fp = fopen(filename, "wb");
     if (fp == NULL) {
-        printf("Error: Failed to create BMP file: %s\n", filename);
         free(image);
         return;
     }
