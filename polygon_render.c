@@ -2,41 +2,10 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <math.h>
 #include <stdbool.h>
 #include <float.h>
-
-Polygon rotate_polygon(Polygon poly, double angle) {
-    Polygon newPoly = {NULL, 0};
-    if (poly.points == NULL || poly.count <= 0) return newPoly;
-    
-    newPoly.points = malloc(sizeof(vec_t) * poly.count);
-	if (newPoly.points == NULL) {
-        newPoly.count = 0;
-        return newPoly;
-    }
-    newPoly.count = poly.count;
-
-    double sum_x = 0, sum_y = 0;
-    double rad = angle * M_PI / 180.0;
-
-    for (int i = 0; i < poly.count; i++) {
-        sum_x += poly.points[i].x;
-        sum_y += poly.points[i].y;
-    }
-    double cx = sum_x / poly.count;
-    double cy = sum_y / poly.count;
-
-    for (int i = 0; i < poly.count; i++) {
-        double x = poly.points[i].x;
-        double y = poly.points[i].y;
-        newPoly.points[i].x = cos(rad) * (x - cx) - sin(rad) * (y - cy) + cx;
-        newPoly.points[i].y = sin(rad) * (x - cx) + cos(rad) * (y - cy) + cy;
-        newPoly.points[i].z = 0.0f; // Z coordinate remains 0 for 2D operations
-    }
-
-    return newPoly;
-}
 
 vec_t intersect(vec_t A1, vec_t B1, vec_t A2, vec_t B2) {
     double x1 = A1.x; double y1 = A1.y; double x2 = B1.x; double y2 = B1.y;
@@ -52,11 +21,10 @@ vec_t intersect(vec_t A1, vec_t B1, vec_t A2, vec_t B2) {
     double py = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / den;
 
     vec_t p = {px, py, 0.0f};
-    if (
-        p.x >= fmin(A1.x, B1.x) && p.x <= fmax(A1.x, B1.x) &&
-        p.x >= fmin(A2.x, B2.x) && p.x <= fmax(A2.x, B2.x) &&
-        p.y >= fmin(A1.y, B1.y) && p.y <= fmax(A1.y, B1.y) && 
-        p.y >= fmin(A2.y, B2.y) && p.y <= fmax(A2.y, B2.y) ){
+    if (p.x >= fmin(A1.x, B1.x) - DBL_EPSILON && p.x <= fmax(A1.x, B1.x) + DBL_EPSILON &&
+    p.x >= fmin(A2.x, B2.x) - DBL_EPSILON && p.x <= fmax(A2.x, B2.x) + DBL_EPSILON &&
+    p.y >= fmin(A1.y, B1.y) - DBL_EPSILON && p.y <= fmax(A1.y, B1.y) + DBL_EPSILON &&
+    p.y >= fmin(A2.y, B2.y) - DBL_EPSILON && p.y <= fmax(A2.y, B2.y) + DBL_EPSILON) {
         return p;
     } else {
         return (vec_t) {NAN, NAN, NAN};
@@ -80,14 +48,16 @@ Polygon offset_polygon(Polygon poly, InfillParams params) {
     Polygon newPoly = {NULL, 0};
     if (poly.points==NULL || poly.count<=0) return newPoly;
     
-
-    double offset_dist = params.offset_distance;
     newPoly.points = malloc(sizeof(vec_t) * poly.count);
     if (newPoly.points == NULL) {
         newPoly.count = 0; 
         return newPoly;
     }
     newPoly.count = poly.count;
+    
+    double area = calc_poly_area(poly);
+    double side = (area>=0) ? 1.0 : -1.0;
+    double d = params.offset_distance * side;
 
     for (int i = 0; i < poly.count; i++) {
         vec_t P1 = poly.points[(i - 1 + poly.count) % poly.count]; // previous corner
@@ -97,20 +67,18 @@ Polygon offset_polygon(Polygon poly, InfillParams params) {
         vec_t unit_n1 = find_normal_unit_vector(P1, P2);
         vec_t unit_n2 = find_normal_unit_vector(P2, P3);
        
-        vec_t A1 = {P1.x + offset_dist * unit_n1.x, P1.y + offset_dist * unit_n1.y, 0.0f};
-        vec_t B1 = {P2.x + offset_dist * unit_n1.x, P2.y + offset_dist * unit_n1.y, 0.0f};
-        vec_t A2 = {P2.x + offset_dist * unit_n2.x, P2.y + offset_dist * unit_n2.y, 0.0f};
-        vec_t B2 = {P3.x + offset_dist * unit_n2.x, P3.y + offset_dist * unit_n2.y, 0.0f};
+        vec_t A1 = {P1.x + d * unit_n1.x, P1.y + d * unit_n1.y, 0.0f};
+        vec_t B1 = {P2.x + d * unit_n1.x, P2.y + d * unit_n1.y, 0.0f};
+        vec_t A2 = {P2.x + d * unit_n2.x, P2.y + d * unit_n2.y, 0.0f};
+        vec_t B2 = {P3.x + d * unit_n2.x, P3.y + d * unit_n2.y, 0.0f};
 
         vec_t ip = intersect(A1, B1, A2, B2);
 
-        // Checks that the intersection point is valid 
         if (isnan(ip.x) || isnan(ip.y)) {
-            newPoly.points[i] = P2; // uses the original point
+            vec_t cand ={P2.x+d*unit_n1.x, P2.y+d*unit_n2.y, 0.0f};
+            newPoly.points[i] = cand; 
         } else {
-            newPoly.points[i].x = ip.x;
-            newPoly.points[i].y = ip.y;
-            newPoly.points[i].z = 0.0f;
+            newPoly.points[i] = ip;
         }
     }
     return newPoly;
@@ -163,6 +131,38 @@ void reverse_poly_points(Polygon* poly){
     }
 }
 
+Polygon rotate_polygon(Polygon poly, double angle) {
+    Polygon newPoly = {NULL, 0};
+    if (poly.points == NULL || poly.count <= 0) return newPoly;
+    
+    newPoly.points = malloc(sizeof(vec_t) * poly.count);
+	if (newPoly.points == NULL) {
+        newPoly.count = 0;
+        return newPoly;
+    }
+    newPoly.count = poly.count;
+
+    double sum_x = 0, sum_y = 0;
+    double rad = angle * M_PI / 180.0;
+
+    for (int i = 0; i < poly.count; i++) {
+        sum_x += poly.points[i].x;
+        sum_y += poly.points[i].y;
+    }
+    double cx = sum_x / poly.count;
+    double cy = sum_y / poly.count;
+
+    for (int i = 0; i < poly.count; i++) {
+        double x = poly.points[i].x;
+        double y = poly.points[i].y;
+        newPoly.points[i].x = cos(rad) * (x - cx) - sin(rad) * (y - cy) + cx;
+        newPoly.points[i].y = sin(rad) * (x - cx) + cos(rad) * (y - cy) + cy;
+        newPoly.points[i].z = 0.0f; // Z coordinate remains 0 for 2D operations
+    }
+
+    return newPoly;
+}
+
 vec_t* generate_horizontal_path(Polygon poly, InfillParams params, int* output_count) {
     if (output_count == NULL) return NULL;
     *output_count = 0;
@@ -171,9 +171,11 @@ vec_t* generate_horizontal_path(Polygon poly, InfillParams params, int* output_c
     if (rotPoly.count == 0) {
         free_polygon(&rotPoly); return NULL;
     }
+    Polygon offsetPoly = offset_polygon(rotPoly, params);
+    free_polygon(&rotPoly);
+    rotPoly = offsetPoly;
 
     double min_y = rotPoly.points[0].y; double max_y = rotPoly.points[0].y;
-
     for (int i = 0; i < rotPoly.count; i++) {
         if (rotPoly.points[i].y < min_y) min_y = rotPoly.points[i].y;
         if (rotPoly.points[i].y > max_y) max_y = rotPoly.points[i].y;
@@ -196,7 +198,6 @@ vec_t* generate_horizontal_path(Polygon poly, InfillParams params, int* output_c
             xqueueFree(&infill_queue);
             free_polygon(&rotPoly); return NULL;
         }
-
         int numIntersections = 0; 
 
         vec_t line_start = {-1e12, y, 0.0f};
@@ -329,21 +330,12 @@ vec_t* generate_spiral_path(Polygon poly, InfillParams params, int* output_count
     if (!currPoly.points) { xqueueFree(&infill_queue); return NULL; }
     memcpy(currPoly.points, poly.points, sizeof(vec_t)*poly.count);
     
-    double scan_spacing = params.scan_radius * (1.0 - params.overlap_ratio);
-    double epsilon = DBL_EPSILON * 1000.0;
-    if (!(scan_spacing > epsilon)) {
-        xqueueFree(&infill_queue);
-        return NULL;
-    }
-
-    params.offset_distance = -(scan_spacing);
     double lastArea = calc_poly_area(currPoly);
     while (true) {
         Polygon nextPoly = offset_polygon(currPoly, params);
         // When the polygon area shrinks sufficiently or begins to grow, end the loop
         double currArea = calc_poly_area(nextPoly);
-        if (fabs(currArea) < DBL_EPSILON * 10000.0 || fabs(currArea)>=fabs(lastArea)){
-            // Find the least polygon's center, free polygons and break the loop
+        if (fabs(currArea) < DBL_EPSILON * 100000.0 || fabs(currArea)>=fabs(lastArea) || nextPoly.count<3){
             double sumx=0, sumy=0, cx=0, cy=0;
             for (int i = 0; i < currPoly.count; i++){
                 sumx += currPoly.points[i].x; sumy += currPoly.points[i].y;

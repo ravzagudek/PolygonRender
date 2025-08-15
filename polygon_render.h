@@ -24,8 +24,6 @@ typedef struct { // Infill parameters structure
     double offset_distance; // Offset distance to be applied from the polygon edge inwards
 } InfillParams;
 
-Polygon rotate_polygon(Polygon poly, double angle); //Rotates the polygon by the given angle
-
 vec_t intersect(vec_t A1, vec_t B1, vec_t A2, vec_t B2); //Finds the intersection point of two line segments
 
 vec_t find_normal_unit_vector(vec_t p1, vec_t p2); //Finds the normal unit vector between two given points
@@ -37,6 +35,8 @@ double calc_poly_area(Polygon poly); //Calculates the polygon area by using Shoe
 void reverse_poly_points(Polygon* poly); // Reverses the points of the given polygon
 
 vec_t* queue_to_array(xqueue_t* q, int* count); // Turns the point queue into an array
+
+Polygon rotate_polygon(Polygon poly, double angle); //Rotates the polygon by the given angle
 
 vec_t* generate_horizontal_path(Polygon poly, InfillParams params, int* output_count); //Creates the infill path horizantally
 
