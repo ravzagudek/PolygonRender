@@ -11,34 +11,28 @@ Polygon rotate_polygon(Polygon poly, double angle) {
     if (poly.points == NULL || poly.count <= 0) return newPoly;
     
     newPoly.points = malloc(sizeof(vec_t) * poly.count);
-    newPoly.count = poly.count;
 	if (newPoly.points == NULL) {
         newPoly.count = 0;
         return newPoly;
     }
+    newPoly.count = poly.count;
 
     double sum_x = 0, sum_y = 0;
     double rad = angle * M_PI / 180.0;
 
-    if (poly.count > 0) {
-        for (int i = 0; i < poly.count; i++) {
-            sum_x += poly.points[i].x;
-            sum_y += poly.points[i].y;
-        }
-        double cx = sum_x / poly.count;
-        double cy = sum_y / poly.count;
+    for (int i = 0; i < poly.count; i++) {
+        sum_x += poly.points[i].x;
+        sum_y += poly.points[i].y;
+    }
+    double cx = sum_x / poly.count;
+    double cy = sum_y / poly.count;
 
-        for (int i = 0; i < poly.count; i++) {
-            double x = poly.points[i].x;
-            double y = poly.points[i].y;
-            newPoly.points[i].x = cos(rad) * (x - cx) - sin(rad) * (y - cy) + cx;
-            newPoly.points[i].y = sin(rad) * (x - cx) + cos(rad) * (y - cy) + cy;
-            newPoly.points[i].z = 0.0f; // Z coordinate remains 0 for 2D operations
-        }
-    } else {
-        free(newPoly.points);
-        newPoly.points = NULL;
-        newPoly.count = 0;
+    for (int i = 0; i < poly.count; i++) {
+        double x = poly.points[i].x;
+        double y = poly.points[i].y;
+        newPoly.points[i].x = cos(rad) * (x - cx) - sin(rad) * (y - cy) + cx;
+        newPoly.points[i].y = sin(rad) * (x - cx) + cos(rad) * (y - cy) + cy;
+        newPoly.points[i].z = 0.0f; // Z coordinate remains 0 for 2D operations
     }
 
     return newPoly;
@@ -83,14 +77,17 @@ vec_t find_normal_unit_vector(vec_t p1, vec_t p2){
 }
 
 Polygon offset_polygon(Polygon poly, InfillParams params) {
+    Polygon newPoly = {NULL, 0};
+    if (poly.points==NULL || poly.count<=0) return newPoly;
+    
+
     double offset_dist = params.offset_distance;
-    Polygon newPoly;
     newPoly.points = malloc(sizeof(vec_t) * poly.count);
-    newPoly.count = poly.count;
     if (newPoly.points == NULL) {
         newPoly.count = 0; 
         return newPoly;
     }
+    newPoly.count = poly.count;
 
     for (int i = 0; i < poly.count; i++) {
         vec_t P1 = poly.points[(i - 1 + poly.count) % poly.count]; // previous corner
@@ -119,47 +116,33 @@ Polygon offset_polygon(Polygon poly, InfillParams params) {
     return newPoly;
 }
 
-InfillPointNode* create_node(vec_t p) {
-    InfillPointNode* new_node = (InfillPointNode*)malloc(sizeof(InfillPointNode));
-    if (new_node == NULL) exit(EXIT_FAILURE);
-    
-    new_node->point = p;
-    new_node->next = NULL;
-    return new_node;
-}
+vec_t* queue_to_array(xqueue_t* q, int* count){
+    if (q == NULL || count == NULL) return NULL;
 
-void add_to_list(InfillPointNode** head, vec_t p) {
-    InfillPointNode* new_node = create_node(p);
-    if (*head == NULL) {
-        *head = new_node;
-    } else {
-        InfillPointNode* current = *head;
-        while (current->next != NULL) {
-            current = current->next;
-        }
-        current->next = new_node;
-    }
-}
+    *count = xqueueSize(q);
 
-void free_list(InfillPointNode* head) {
-    InfillPointNode* current = head;
-    while (current != NULL) {
-        InfillPointNode* next = current->next;
-        free(current);
-        current = next;
-    }
-}
+    vec_t* pointArray = (vec_t*)malloc(*count * sizeof(vec_t));
+    if (pointArray == NULL)  return NULL;
 
-RingNode* reverse_ring_list (RingNode* head){
-    RingNode* prev = NULL;
-    RingNode* curr = head;
-    while (curr!=NULL){
-        RingNode* next = curr->next;
-        curr->next = prev;
-        prev = curr;
-        curr = next;
+    xqueue_t temp = xqueueNew(sizeof(vec_t)); // Temporary queue
+    if(temp.array == NULL) {
+        free(pointArray);
+        return NULL;
     }
-    return prev;
+    for (int i = 0; i < *count; i++){
+        vec_t currPoint;
+        xqueueDequeue(q, &currPoint);
+        pointArray[i] = currPoint;
+        xqueueEnqueue(&temp, &currPoint);
+    }
+    for (int i = 0; i < *count; i++){ // Fill the original queue again
+        vec_t tempPoint;
+        xqueueDequeue(&temp, &tempPoint);
+        xqueueEnqueue(q, &tempPoint);
+    }
+    xqueueFree(&temp);
+
+    return pointArray;
 }
 
 double calc_poly_area(Polygon poly){
@@ -180,43 +163,13 @@ void reverse_poly_points(Polygon* poly){
     }
 }
 
-vec_t* list_to_array(InfillPointNode* head, int* count) {
-    *count = 0;
-    if (head == NULL) {
-        return NULL;
-    }
-
-    int num_points = 0;
-    InfillPointNode* current = head;
-
-    while (current != NULL) {
-        num_points++;
-        current = current->next;
-    }
-
-    if (num_points == 0) {
-        *count = 0;
-        return NULL;
-    }
-
-    vec_t* point_array = (vec_t*)malloc(num_points * sizeof(vec_t));
-    if (point_array == NULL) exit(EXIT_FAILURE);
-    
-    current = head;
-    for (int i = 0; i < num_points; i++) {
-        point_array[i] = current->point;
-        current = current->next;
-    }
-    *count = num_points;
-    return point_array;
-}
-
 vec_t* generate_horizontal_path(Polygon poly, InfillParams params, int* output_count) {
+    if (output_count == NULL) return NULL;
+    *output_count = 0;
+    
     Polygon rotPoly = rotate_polygon(poly, params.infill_angle);
     if (rotPoly.count == 0) {
-        free_polygon(&rotPoly);
-        *output_count = 0;
-        return NULL;
+        free_polygon(&rotPoly); return NULL;
     }
 
     double min_y = rotPoly.points[0].y; double max_y = rotPoly.points[0].y;
@@ -228,21 +181,23 @@ vec_t* generate_horizontal_path(Polygon poly, InfillParams params, int* output_c
 
     double scan_spacing = params.scan_radius * (1.0 - params.overlap_ratio);
 
-    InfillPointNode* infill_list_head = NULL;
-    double epsilon = DBL_EPSILON * 1000.0;
+    xqueue_t infill_queue = xqueueNew(sizeof(vec_t));
+    if (infill_queue.array == NULL) {
+        free_polygon(&rotPoly); return NULL;
+    }
 
+    double epsilon = DBL_EPSILON * 1000.0;
     vec_t previous_line_end_point = {NAN, NAN, NAN};
     bool forward_scan = true;
 
     for (double y = min_y + epsilon; y <= max_y - epsilon; y += scan_spacing) {
         vec_t* current_line_intersections = (vec_t*)malloc(sizeof(vec_t) * rotPoly.count * 2);
         if (current_line_intersections == NULL) { 
-            free_list(infill_list_head);
-            free_polygon(&rotPoly);
-            *output_count = 0;
-            return NULL;
+            xqueueFree(&infill_queue);
+            free_polygon(&rotPoly); return NULL;
         }
-        int numIntersections = 0;
+
+        int numIntersections = 0; 
 
         vec_t line_start = {-1e12, y, 0.0f};
         vec_t line_end = {1e12, y, 0.0f};
@@ -324,24 +279,24 @@ vec_t* generate_horizontal_path(Polygon poly, InfillParams params, int* output_c
         if (numIntersections >= 2 && numIntersections % 2 == 0) {
             if (!isnan(previous_line_end_point.x)) {
                 if (forward_scan) {
-                    add_to_list(&infill_list_head, previous_line_end_point);
-                    add_to_list(&infill_list_head, current_line_intersections[0]);
+                    xqueueEnqueue(&infill_queue, &previous_line_end_point);
+                    xqueueEnqueue(&infill_queue, &current_line_intersections[0]);
                 } else {
-                    add_to_list(&infill_list_head, previous_line_end_point);
-                    add_to_list(&infill_list_head, current_line_intersections[numIntersections - 1]);
+                    xqueueEnqueue(&infill_queue, &previous_line_end_point);
+                    xqueueEnqueue(&infill_queue, &current_line_intersections[numIntersections - 1]);
                 }
             }
 
             if (forward_scan) {
                 for (int i = 0; i < numIntersections; i += 2) {
-                    add_to_list(&infill_list_head, current_line_intersections[i]);
-                    add_to_list(&infill_list_head, current_line_intersections[i + 1]);
+                    xqueueEnqueue(&infill_queue, &current_line_intersections[i]);
+                    xqueueEnqueue(&infill_queue, &current_line_intersections[i + 1]);
                 }
                 previous_line_end_point = current_line_intersections[numIntersections - 1];
             } else {
                 for (int i = numIntersections - 1; i >= 0; i -= 2) {
-                    add_to_list(&infill_list_head, current_line_intersections[i]);
-                    add_to_list(&infill_list_head, current_line_intersections[i - 1]);
+                    xqueueEnqueue(&infill_queue, &current_line_intersections[i]);
+                    xqueueEnqueue(&infill_queue, &current_line_intersections[i - 1]);
                 }
                 previous_line_end_point = current_line_intersections[0];
             }
@@ -350,115 +305,82 @@ vec_t* generate_horizontal_path(Polygon poly, InfillParams params, int* output_c
         forward_scan = !forward_scan;
     }
 
-    vec_t* infill_points = list_to_array(infill_list_head, output_count);
-	free_list(infill_list_head);
-
-    Polygon temp_infill_poly;
-    temp_infill_poly.points = infill_points;
-    temp_infill_poly.count = *output_count;
-
-    Polygon rotated_infill_poly = rotate_polygon(temp_infill_poly, -params.infill_angle);
-    free_polygon(&temp_infill_poly); 
-    if (infill_points != NULL) {
-        temp_infill_poly.points = NULL; temp_infill_poly.count = 0;
-    }
-
-    infill_points = rotated_infill_poly.points;
-    *output_count = rotated_infill_poly.count;
+    vec_t* infill_path = queue_to_array(&infill_queue, output_count);
+    Polygon resultPoly = {infill_path, *output_count};
+    Polygon rotated = rotate_polygon(resultPoly, -params.infill_angle);
+    
+    free(infill_path);
+    xqueueFree(&infill_queue);
     free_polygon(&rotPoly);
-    return infill_points;
+    
+    vec_t* result = rotated.points;
+    return result;
 }
 
 vec_t* generate_spiral_path(Polygon poly, InfillParams params, int* output_count){
+    xqueue_t infill_queue = xqueueNew(sizeof(vec_t)); 
+    if (infill_queue.array == NULL) {
+        *output_count = 0;
+        return NULL;
+    }
+
+    Polygon currPoly = { NULL, poly.count };
+    currPoly.points = malloc(sizeof(vec_t) * poly.count);
+    if (!currPoly.points) { xqueueFree(&infill_queue); return NULL; }
+    memcpy(currPoly.points, poly.points, sizeof(vec_t)*poly.count);
+    
     double scan_spacing = params.scan_radius * (1.0 - params.overlap_ratio);
-    InfillPointNode* infillPathHead = NULL;
-    *output_count = 0;
-    RingNode* ringHead = NULL; RingNode* ringTail = NULL;
-    params.offset_distance = -(scan_spacing); Polygon currPoly = poly;
-    double lastArea = calc_poly_area(poly);
+    double epsilon = DBL_EPSILON * 1000.0;
+    if (!(scan_spacing > epsilon)) {
+        xqueueFree(&infill_queue);
+        return NULL;
+    }
+
+    params.offset_distance = -(scan_spacing);
+    double lastArea = calc_poly_area(currPoly);
     while (true) {
         Polygon nextPoly = offset_polygon(currPoly, params);
         // When the polygon area shrinks sufficiently or begins to grow, end the loop
         double currArea = calc_poly_area(nextPoly);
-        if (fabs(currArea) < (scan_spacing * scan_spacing) / 2.0 || fabs(currArea)>=fabs(lastArea)){
+        if (fabs(currArea) < DBL_EPSILON * 10000.0 || fabs(currArea)>=fabs(lastArea)){
             // Find the least polygon's center, free polygons and break the loop
             double sumx=0, sumy=0, cx=0, cy=0;
             for (int i = 0; i < currPoly.count; i++){
                 sumx += currPoly.points[i].x; sumy += currPoly.points[i].y;
             }
             cx = sumx / currPoly.count; cy = sumy / currPoly.count;
-            vec_t center = {cx, cy, 0.0f}; add_to_list(&infillPathHead, center);
-            free_polygon(&currPoly); free_polygon(&nextPoly);
+            vec_t center = {cx, cy, 0.0f}; xqueueEnqueue(&infill_queue, &center);
+            free_polygon(&currPoly); free_polygon(&nextPoly); 
             break;
         }
         // Save all the points of the rings in the same direction
         if (calc_poly_area(currPoly)*calc_poly_area(nextPoly)<0) reverse_poly_points(&nextPoly);
-        // Create a single ring of ofsetted polygon
-        InfillPointNode* singleRing = NULL;
         for (int i = 0; i < nextPoly.count; i++){
-            add_to_list(&singleRing, nextPoly.points[i]);
+            xqueueEnqueue(&infill_queue, &nextPoly.points[i]);
         }
-        // Add the new polygon into the main ofsetted polygons list
-        RingNode* newRing = malloc(sizeof(RingNode));
-        if (newRing==NULL){
-            while (ringHead){
-                RingNode* temp = ringHead->next;
-                free_list(ringHead->ringPoints);
-                free(ringHead);
-                ringHead = temp;
-            }
-            free_polygon(&currPoly);
-            *output_count = 0;
-            return NULL;
-        }
-
-        newRing->ringPoints=singleRing; 
-        newRing->count=nextPoly.count; 
-        newRing->next=NULL;
-        
-        if (ringHead==NULL){
-            ringHead=newRing; ringTail=newRing;
-        } else {
-            ringTail->next = newRing; ringTail=newRing;
-        }
-        free_polygon(&currPoly); currPoly = nextPoly; lastArea=currArea;
-    }
-    
-    ringHead = reverse_ring_list(ringHead);
-    vec_t lastPoint = {NAN, NAN, NAN};
-    RingNode* currRing = ringHead;
-    while (currRing!=NULL){
-        InfillPointNode* currPoint = currRing->ringPoints;
-
-        if (!isnan(lastPoint.x) && !isnan(lastPoint.y)){
-            add_to_list(&infillPathHead, lastPoint);
-            add_to_list(&infillPathHead, currPoint->point);
-        }
-
-        while(currPoint!=NULL){
-            add_to_list(&infillPathHead, currPoint->point);
-            lastPoint = currPoint->point;
-            currPoint = currPoint->next;
-        }
-        currRing = currRing->next;
-    }
-        
-    // Free ring list
-    RingNode* curr = ringHead;
-    while(curr!=NULL){
-        RingNode* next = curr->next;
-        free_list(curr->ringPoints);
-        free(curr);
-        curr = next;
+        free_polygon(&currPoly); 
+        currPoly = nextPoly; 
+        lastArea=currArea;
     }
 
-    vec_t* infill_points = list_to_array(infillPathHead, output_count);
-	free_list(infillPathHead);
-    return infill_points;  
+    *output_count = xqueueSize(&infill_queue);
+    vec_t* tempArr = queue_to_array(&infill_queue, output_count);
+    xqueueFree(&infill_queue);
+    xqueue_t reversedInfillQueue = xqueueNew(sizeof(vec_t));
+    for (int i = *output_count-1; i >= 0; i--) {
+        xqueueEnqueue(&reversedInfillQueue, &tempArr[i]);
+    }
+
+    vec_t* result = queue_to_array(&reversedInfillQueue, output_count);
+    xqueueFree(&reversedInfillQueue);
+    free(tempArr);
+    return result;
 }
 
 vec_t* generate_infill_path(Polygon poly, InfillParams params, int* output_count, int choice) {
+    if (output_count == NULL) return NULL;
     *output_count = 0;
+
     switch (choice){
     case 1:
         return generate_horizontal_path(poly, params, output_count);
