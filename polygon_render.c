@@ -33,15 +33,14 @@ vec_t intersect(vec_t A1, vec_t B1, vec_t A2, vec_t B2) {
 }
 
 vec_t find_normal_unit_vector(vec_t p1, vec_t p2){
-    double vec_dx = p2.x - p1.x;
-    double vec_dy = p2.y - p1.y;
-    double len = sqrt(vec_dx * vec_dx + vec_dy * vec_dy);
-    double nx = 0, ny = 0;
-    if (len > DBL_EPSILON) {
-        nx = -vec_dy/len ; ny = vec_dx/len;
-    }
-    vec_t n = {nx, ny, 0.0f};
-    return n;
+    vec_t vec = {p2.x - p1.x, p2.y - p1.y, 0.0f};
+    double len = sqrt(vec.x * vec.x + vec.y * vec.y);
+    return (vec_t) {vec.y/len, -vec.x/len, 0.0f};
+}
+
+vec_t normalize(vec_t p){
+    double len = sqrt(p.x*p.x + p.y*p.y);
+    return (vec_t) {p.x/len, p.y/len, 0.0f};
 }
 
 Polygon offset_polygon(Polygon poly, InfillParams params) {
@@ -56,8 +55,8 @@ Polygon offset_polygon(Polygon poly, InfillParams params) {
     newPoly.count = poly.count;
     
     double area = calc_poly_area(poly);
-    double side = (area>=0) ? 1.0 : -1.0;
-    double d = params.offset_distance * side;
+    double direction = (area>=0) ? -1.0 : 1.0;
+    double d = -params.offset_distance * direction;
 
     for (int i = 0; i < poly.count; i++) {
         vec_t P1 = poly.points[(i - 1 + poly.count) % poly.count]; // previous corner
@@ -75,8 +74,16 @@ Polygon offset_polygon(Polygon poly, InfillParams params) {
         vec_t ip = intersect(A1, B1, A2, B2);
 
         if (isnan(ip.x) || isnan(ip.y)) {
-            vec_t cand ={P2.x+d*unit_n1.x, P2.y+d*unit_n2.y, 0.0f};
-            newPoly.points[i] = cand; 
+            vec_t unit_sum = {unit_n1.x + unit_n2.x, unit_n1.y + unit_n2.y, 0.0f};
+            vec_t bis = normalize(unit_sum);
+            double cosHalf = bis.x * unit_n1.x + bis.y * unit_n1.y;
+            if (fabs(cosHalf) < 1e-12) {
+                vec_t cand = { P2.x + d * unit_n1.x, P2.y + d * unit_n1.y, 0.0f };
+                newPoly.points[i] = cand;
+            } else {
+                vec_t cand = { P2.x + bis.x * (d / cosHalf), P2.y + bis.y * (d / cosHalf), 0.0f };
+                newPoly.points[i] = cand;
+            }
         } else {
             newPoly.points[i] = ip;
         }
@@ -84,7 +91,7 @@ Polygon offset_polygon(Polygon poly, InfillParams params) {
     return newPoly;
 }
 
-vec_t* queue_to_array(xqueue_t* q, int* count){
+vec_t* queue_to_array(xqueue_t* q, int* count) {
     if (q == NULL || count == NULL) return NULL;
 
     *count = xqueueSize(q);
@@ -325,13 +332,16 @@ vec_t* generate_spiral_path(Polygon poly, InfillParams params, int* output_count
         return NULL;
     }
 
+    double scan_spacing = -(params.scan_radius*(1-params.overlap_ratio));
+
     Polygon currPoly = { NULL, poly.count };
     currPoly.points = malloc(sizeof(vec_t) * poly.count);
     if (!currPoly.points) { xqueueFree(&infill_queue); return NULL; }
     memcpy(currPoly.points, poly.points, sizeof(vec_t)*poly.count);
-    
     double lastArea = calc_poly_area(currPoly);
+    int i=1;
     while (true) {
+        params.offset_distance = scan_spacing*i;
         Polygon nextPoly = offset_polygon(currPoly, params);
         // When the polygon area shrinks sufficiently or begins to grow, end the loop
         double currArea = calc_poly_area(nextPoly);
@@ -340,8 +350,8 @@ vec_t* generate_spiral_path(Polygon poly, InfillParams params, int* output_count
             for (int i = 0; i < currPoly.count; i++){
                 sumx += currPoly.points[i].x; sumy += currPoly.points[i].y;
             }
-            cx = sumx / currPoly.count; cy = sumy / currPoly.count;
-            vec_t center = {cx, cy, 0.0f}; xqueueEnqueue(&infill_queue, &center);
+            vec_t center = {sumx / currPoly.count, sumy / currPoly.count, 0.0f}; 
+            xqueueEnqueue(&infill_queue, &center);
             free_polygon(&currPoly); free_polygon(&nextPoly); 
             break;
         }
@@ -350,9 +360,8 @@ vec_t* generate_spiral_path(Polygon poly, InfillParams params, int* output_count
         for (int i = 0; i < nextPoly.count; i++){
             xqueueEnqueue(&infill_queue, &nextPoly.points[i]);
         }
-        free_polygon(&currPoly); 
-        currPoly = nextPoly; 
-        lastArea=currArea;
+        free_polygon(&nextPoly); lastArea=currArea;
+        i++;
     }
 
     *output_count = xqueueSize(&infill_queue);
