@@ -7,7 +7,7 @@
 #include <stdbool.h>
 #include <float.h>
 
-// Path Functions
+// Auxiliary Functions
 
 vec_t intersect(vec_t A1, vec_t B1, vec_t A2, vec_t B2) {
     double x1 = A1.x; double y1 = A1.y; double x2 = B1.x; double y2 = B1.y;
@@ -104,6 +104,8 @@ int cmp(const void *a, const void *b){
     if (dx>0) return 1;
     return 0;
 }
+
+// Main Functions
 
 Polygon offset_polygon(Polygon poly, InfillParams params) {
     Polygon newPoly = {NULL, 0};
