@@ -32,8 +32,6 @@ vec_t* generate_spiral_path(Polygon poly, InfillParams params, int* outputCount)
 
 vec_t* generate_infill_path(Polygon poly, InfillParams params, int* outputCount, int choice); //Creates an infill path for the polygon by using the user's choice
 
-void export_to_bmp(Polygon poly, vec_t* path, int outputCount, const char* filename); //Exports the created polygon and fill path to a .bmp file
-
 void free_polygon(Polygon* poly); //Releases memory allocated in the polygon structure
 
 #endif
